@@ -76,8 +76,67 @@ func (q RabbitListenerEx) Start(queueName string, handler ConsumeHandler) {
 	}
 }
 
-func (q RabbitListenerEx) Stop(queueName string) {
+func (q RabbitListenerEx) StartWithNotifyError(queueName string, handler ConsumeHandler, c chan *amqp.Error) {
 	if channel, ok := q.channels[queueName]; ok {
+		var que *ConsumerConf
+		for _, queue := range q.queues.ListenerQueues {
+			if queue.Name == queueName {
+				que = &queue
+				break
+			}
+		}
+		if que == nil {
+			log.Fatalf("failed to find the responding queue: %s", queueName)
+		}
+
+		msg, err := channel.Consume(
+			que.Name,
+			"",
+			que.AutoAck,
+			que.Exclusive,
+			que.NoLocal,
+			que.NoWait,
+			nil,
+		)
+		if err != nil {
+			log.Fatalf("failed to listener, error: %v", err)
+		}
+
+		channel.NotifyClose(c)
+
+		go func() {
+			for d := range msg {
+				if err := handler.Consume(string(d.Body)); err != nil {
+					logx.Errorf("Error on consuming: %s, error: %v", string(d.Body), err)
+				}
+			}
+		}()
+
+		<-q.forevers[queueName]
+	}
+}
+
+func (q RabbitListenerEx) IsChannelClosed(queueName string) bool {
+	if channel, ok := q.channels[queueName]; ok {
+		return channel.IsClosed()
+	}
+
+	return false
+}
+
+func (q RabbitListenerEx) IsConnClosed() bool {
+	return q.conn.IsClosed()
+}
+
+func (q RabbitListenerEx) StopQueue(queueName string) {
+	if channel, ok := q.channels[queueName]; ok {
+		channel.Close()
+		close(q.forevers[queueName])
+	}
+}
+
+func (q RabbitListenerEx) Stop() {
+	for queueName, channel := range q.channels {
 		channel.Close()
 		close(q.forevers[queueName])
 	}
