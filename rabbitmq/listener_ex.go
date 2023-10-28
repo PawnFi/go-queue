@@ -145,7 +145,9 @@ func (q RabbitListenerEx) StopQueue(queueName string) {
 		}
 
 		channel.Close()
-		close(q.forevers[queueName])
+		if _, okC := <-q.forevers[queueName]; okC {
+			close(q.forevers[queueName])
+		}
 	}
 }
 
@@ -161,7 +163,9 @@ func (q RabbitListenerEx) Stop() {
 		}
 
 		channel.Close()
-		close(q.forevers[queueName])
+		if _, ok := <-q.forevers[queueName]; ok {
+			close(q.forevers[queueName])
+		}
 	}
 
 	q.conn.Close()
