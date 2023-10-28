@@ -143,11 +143,10 @@ func (q RabbitListenerEx) StopQueue(queueName string) {
 		if !atomic.CompareAndSwapInt32(&qStopped, 0, 1) {
 			return
 		}
+		q.qStopped[queueName] = qStopped
 
 		channel.Close()
-		if _, okC := <-q.forevers[queueName]; okC {
-			close(q.forevers[queueName])
-		}
+		close(q.forevers[queueName])
 	}
 }
 
@@ -161,11 +160,10 @@ func (q RabbitListenerEx) Stop() {
 		if !atomic.CompareAndSwapInt32(&qStopped, 0, 1) {
 			continue
 		}
+		q.qStopped[queueName] = qStopped
 
 		channel.Close()
-		if _, ok := <-q.forevers[queueName]; ok {
-			close(q.forevers[queueName])
-		}
+		close(q.forevers[queueName])
 	}
 
 	q.conn.Close()
