@@ -2,6 +2,7 @@ package rabbitmq
 
 import (
 	"log"
+	"sync/atomic"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -13,6 +14,9 @@ type (
 		channels map[string]*amqp.Channel
 		forevers map[string]chan bool
 		queues   RabbitListenerConf
+		qStopped map[string]int32
+		// stopped is set to 1 when stopped
+		stopped int32
 	}
 )
 
@@ -26,6 +30,7 @@ func MustNewListenerEx(listenerConf RabbitListenerConf) *RabbitListenerEx {
 	listener.conn = conn
 	listener.channels = make(map[string]*amqp.Channel)
 	listener.forevers = make(map[string]chan bool)
+	listener.qStopped = make(map[string]int32)
 	for _, queue := range listenerConf.ListenerQueues {
 		channel, err := listener.conn.Channel()
 		if err != nil {
@@ -34,6 +39,7 @@ func MustNewListenerEx(listenerConf RabbitListenerConf) *RabbitListenerEx {
 
 		listener.channels[queue.Name] = channel
 		listener.forevers[queue.Name] = make(chan bool)
+		listener.qStopped[queue.Name] = 0
 	}
 	return listener
 }
@@ -112,6 +118,9 @@ func (q RabbitListenerEx) StartWithNotifyError(queueName string, handler Consume
 			}
 		}()
 
+		qStopped := q.qStopped[queueName]
+		atomic.CompareAndSwapInt32(&qStopped, 1, 0)
+
 		<-q.forevers[queueName]
 	}
 }
@@ -130,13 +139,27 @@ func (q RabbitListenerEx) IsConnClosed() bool {
 
 func (q RabbitListenerEx) StopQueue(queueName string) {
 	if channel, ok := q.channels[queueName]; ok {
+		qStopped := q.qStopped[queueName]
+		if !atomic.CompareAndSwapInt32(&qStopped, 0, 1) {
+			return
+		}
+
 		channel.Close()
 		close(q.forevers[queueName])
 	}
 }
 
 func (q RabbitListenerEx) Stop() {
+	if !atomic.CompareAndSwapInt32(&q.stopped, 0, 1) {
+		return
+	}
+
 	for queueName, channel := range q.channels {
+		qStopped := q.qStopped[queueName]
+		if !atomic.CompareAndSwapInt32(&qStopped, 0, 1) {
+			continue
+		}
+
 		channel.Close()
 		close(q.forevers[queueName])
 	}
