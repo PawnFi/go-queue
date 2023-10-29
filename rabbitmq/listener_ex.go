@@ -20,21 +20,22 @@ type (
 	}
 )
 
-func MustNewListenerEx(listenerConf RabbitListenerConf) *RabbitListenerEx {
+func MustNewListenerEx(listenerConf RabbitListenerConf, c chan *amqp.Error) *RabbitListenerEx {
 	listener := &RabbitListenerEx{queues: listenerConf}
 	conn, err := amqp.Dial(getRabbitURL(listenerConf.RabbitConf))
 	if err != nil {
 		log.Fatalf("failed to connect rabbitmq, error: %v", err)
 	}
+	conn.NotifyClose(c)
 
 	listener.conn = conn
 	listener.channels = make(map[string]*amqp.Channel)
 	listener.forevers = make(map[string]chan bool)
 	listener.qStopped = make(map[string]int32)
 	for _, queue := range listenerConf.ListenerQueues {
-		channel, err := listener.conn.Channel()
-		if err != nil {
-			log.Fatalf("failed to open a channel: %v", err)
+		channel, errQ := listener.conn.Channel()
+		if errQ != nil {
+			log.Fatalf("failed to open a channel: %v", errQ)
 		}
 
 		listener.channels[queue.Name] = channel
