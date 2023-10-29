@@ -32,98 +32,103 @@ func MustNewListenerEx(listenerConf RabbitListenerConf, c chan *amqp.Error) *Rab
 	listener.channels = make(map[string]*amqp.Channel)
 	listener.forevers = make(map[string]chan bool)
 	listener.qStopped = make(map[string]int32)
-	for _, queue := range listenerConf.ListenerQueues {
-		channel, errQ := listener.conn.Channel()
-		if errQ != nil {
-			log.Fatalf("failed to open a channel: %v", errQ)
-		}
 
-		listener.channels[queue.Name] = channel
-		listener.forevers[queue.Name] = make(chan bool)
-		listener.qStopped[queue.Name] = 0
-	}
 	return listener
 }
 
 func (q RabbitListenerEx) Start(queueName string, handler ConsumeHandler) {
-	if channel, ok := q.channels[queueName]; ok {
-		var que *ConsumerConf
-		for _, queue := range q.queues.ListenerQueues {
-			if queue.Name == queueName {
-				que = &queue
-				break
-			}
-		}
-		if que == nil {
-			log.Fatalf("failed to find the responding queue: %s", queueName)
-		}
-
-		msg, err := channel.Consume(
-			que.Name,
-			"",
-			que.AutoAck,
-			que.Exclusive,
-			que.NoLocal,
-			que.NoWait,
-			nil,
-		)
-		if err != nil {
-			log.Fatalf("failed to listener, error: %v", err)
-		}
-
-		go func() {
-			for d := range msg {
-				if err := handler.Consume(string(d.Body)); err != nil {
-					logx.Errorf("Error on consuming: %s, error: %v", string(d.Body), err)
-				}
-			}
-		}()
-
-		<-q.forevers[queueName]
+	channel, err := q.conn.Channel()
+	if err != nil {
+		log.Fatalf("failed to open a channel: %v", err)
 	}
+
+	q.channels[queueName] = channel
+	q.forevers[queueName] = make(chan bool)
+	q.qStopped[queueName] = 0
+
+	var que *ConsumerConf
+	for _, queue := range q.queues.ListenerQueues {
+		if queue.Name == queueName {
+			que = &queue
+			break
+		}
+	}
+	if que == nil {
+		log.Fatalf("failed to find the responding queue: %s", queueName)
+	}
+
+	msg, err := channel.Consume(
+		que.Name,
+		"",
+		que.AutoAck,
+		que.Exclusive,
+		que.NoLocal,
+		que.NoWait,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("failed to listener, error: %v", err)
+	}
+
+	go func() {
+		for d := range msg {
+			if err := handler.Consume(string(d.Body)); err != nil {
+				logx.Errorf("Error on consuming: %s, error: %v", string(d.Body), err)
+			}
+		}
+	}()
+
+	<-q.forevers[queueName]
 }
 
 func (q RabbitListenerEx) StartWithNotifyError(queueName string, handler ConsumeHandler, c chan *amqp.Error) {
-	if channel, ok := q.channels[queueName]; ok {
-		var que *ConsumerConf
-		for _, queue := range q.queues.ListenerQueues {
-			if queue.Name == queueName {
-				que = &queue
-				break
-			}
-		}
-		if que == nil {
-			log.Fatalf("failed to find the responding queue: %s", queueName)
-		}
-
-		msg, err := channel.Consume(
-			que.Name,
-			"",
-			que.AutoAck,
-			que.Exclusive,
-			que.NoLocal,
-			que.NoWait,
-			nil,
-		)
-		if err != nil {
-			log.Fatalf("failed to listener, error: %v", err)
-		}
-
-		channel.NotifyClose(c)
-
-		go func() {
-			for d := range msg {
-				if err := handler.Consume(string(d.Body)); err != nil {
-					logx.Errorf("Error on consuming: %s, error: %v", string(d.Body), err)
-				}
-			}
-		}()
-
-		qStopped := q.qStopped[queueName]
-		atomic.CompareAndSwapInt32(&qStopped, 1, 0)
-
-		<-q.forevers[queueName]
+	channel, err := q.conn.Channel()
+	if err != nil {
+		log.Fatalf("failed to open a channel: %v", err)
 	}
+
+	q.channels[queueName] = channel
+	q.forevers[queueName] = make(chan bool)
+	q.qStopped[queueName] = 0
+
+	var que *ConsumerConf
+	for _, queue := range q.queues.ListenerQueues {
+		if queue.Name == queueName {
+			que = &queue
+			break
+		}
+	}
+	if que == nil {
+		log.Fatalf("failed to find the responding queue: %s", queueName)
+	}
+
+	msg, err := channel.Consume(
+		que.Name,
+		"",
+		que.AutoAck,
+		que.Exclusive,
+		que.NoLocal,
+		que.NoWait,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("failed to listener, error: %v", err)
+	}
+
+	channel.NotifyClose(c)
+
+	go func() {
+		for d := range msg {
+			if err := handler.Consume(string(d.Body)); err != nil {
+				logx.Errorf("Error on consuming: %s, error: %v", string(d.Body), err)
+			}
+		}
+	}()
+
+	qStopped := q.qStopped[queueName]
+	atomic.CompareAndSwapInt32(&qStopped, 1, 0)
+
+	<-q.forevers[queueName]
 }
 
 func (q RabbitListenerEx) IsChannelClosed(queueName string) bool {
